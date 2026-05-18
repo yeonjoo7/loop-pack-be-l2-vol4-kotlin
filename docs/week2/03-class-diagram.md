@@ -35,6 +35,7 @@ classDiagram
         +String description
         +BigDecimal price
         +Int stockQuantity
+        +Int likeCount
         +LocalDateTime createdAt
         +LocalDateTime updatedAt
         +LocalDateTime deletedAt
@@ -44,7 +45,21 @@ classDiagram
         +hasStock(quantity) Boolean
         +deductStock(quantity) void
         +restoreStock(quantity) void
+        +incrementLikeCount() void
+        +decrementLikeCount() void
         +toSnapshot() OrderItemSnapshot
+    }
+
+    class LikeCreatedEvent {
+        +Long productId
+        +Long userId
+        +LikeEventType type
+    }
+
+    class LikeEventType {
+        <<enumeration>>
+        LIKED
+        UNLIKED
     }
 
     class Like {
@@ -98,6 +113,8 @@ classDiagram
     OrderItem ..> OrderItemSnapshot : 스냅샷으로 초기화
     Order --> OrderStatus : 상태 보유
     Like "0..*" --> "1" Product : 좋아요 대상
+    Like ..> LikeCreatedEvent : AFTER_COMMIT 발행
+    LikeCreatedEvent --> LikeEventType
 ```
 
 ---
@@ -135,14 +152,17 @@ classDiagram
 | `description` | 상품 설명 |
 | `price` | 상품 가격 (BigDecimal: 부동소수점 오류 방지) |
 | `stockQuantity` | 현재 재고 수량 (0 이상) |
+| `likeCount` | 좋아요 수 (비정규화 집계값, likes_desc 정렬에 활용) |
 | `deletedAt` | Soft Delete 기록 |
 | `update(...)` | 이름, 설명, 가격, 재고 수정. brandId 수정은 제공하지 않음 |
 | `hasStock(quantity)` | 요청 수량만큼 재고가 있는지 확인 |
 | `deductStock(quantity)` | 재고 차감. 재고 부족 시 예외 발생 |
 | `restoreStock(quantity)` | 결제 실패 보상 시 재고 복구 |
+| `incrementLikeCount()` | 좋아요 등록 시 likeCount 증가 (이벤트 핸들러에서 호출) |
+| `decrementLikeCount()` | 좋아요 취소 시 likeCount 감소 (0 미만 방지) |
 | `toSnapshot()` | 현재 시점의 name, price를 OrderItemSnapshot으로 변환 |
 
-**설계 의도**: `deductStock()`과 `restoreStock()`을 도메인 메서드로 두면, 재고 연산의 유효성 검증(0 이하 불가 등)이 한 곳에 모인다. 서비스 레이어에서 직접 `stockQuantity--`를 하지 않는다.
+**설계 의도**: `deductStock()`과 `restoreStock()`을 도메인 메서드로 두면, 재고 연산의 유효성 검증(0 이하 불가 등)이 한 곳에 모인다. 서비스 레이어에서 직접 `stockQuantity--`를 하지 않는다. `likeCount`도 동일하게 도메인 메서드를 통해서만 변경한다.
 
 **`brandId`를 객체 참조가 아닌 ID로 두는 이유**: JPA `@ManyToOne`으로 Brand를 직접 참조할 수도 있지만, 집계 루트(Aggregate Root) 개념에 따라 Brand와 Product를 별도 집계로 보고 ID 참조만 유지한다. Brand 전체를 Product 조회 시마다 JOIN하는 비용을 줄이는 효과도 있다.
 
@@ -275,9 +295,10 @@ Product "1" ..> "1" OrderItemSnapshot
 
 ### 1. 도메인 간 결합도 (Brand ↔ Product)
 
-Brand 삭제 시 Product의 Soft Delete를 서비스 레이어에서 처리할 경우, 서비스 코드가 두 도메인에 걸쳐 있다. Brand 삭제 로직이 변경되면 Product 처리 로직도 함께 수정해야 하는 위험이 있다.
+Brand는 Product를 모른다. 브랜드 삭제 시 Product Soft Delete는 `BrandService`가 직접 처리한다. 서비스 코드가 두 도메인에 걸쳐 있어, Brand 삭제 로직 변경 시 Product 처리도 함께 수정해야 하는 위험이 있다.
 
-**대응 방안**: 도메인 이벤트(Domain Event) 패턴 적용. `BrandDeletedEvent`를 발행하면 `ProductEventHandler`가 받아 처리하는 방식으로 결합도를 낮출 수 있다.
+**현재 선택**: Service 레이어 직접 처리 (단순성 우선).
+**대안**: `BrandDeletedEvent` 발행 → `ProductEventHandler`가 처리 — 결합도를 낮추지만 이벤트 추적이 복잡해짐.
 
 ### 2. 트랜잭션 비대화 (Order 생성)
 
@@ -291,11 +312,13 @@ Brand 삭제 시 Product의 Soft Delete를 서비스 레이어에서 처리할 �
 
 **대응 방안**: Outbox 패턴 또는 이벤트 소싱으로 보상 작업의 신뢰성 보장. 최소한 실패 알림을 운영팀에 전달하는 체계 마련.
 
-### 4. `likes_desc` 정렬 성능
+### 4. `likeCount` 갱신의 eventual consistency
 
-상품 목록을 좋아요 수 기준으로 정렬하려면 좋아요 수를 실시간으로 집계해야 한다. 데이터가 많아질수록 쿼리 비용이 증가한다.
+`likeCount`는 Product에 직접 보유하여 `likes_desc` 정렬에 활용한다. 갱신은 `@TransactionalEventListener(AFTER_COMMIT)`으로 별도 TX에서 처리하므로, Like 저장은 성공했지만 likeCount 미반영 상태가 일시적으로 존재할 수 있다.
 
-**대응 방안**: Product 테이블에 `like_count` 컬럼을 비정규화하여 좋아요 등록/취소 시 업데이트. 집계 쿼리 없이 정렬 가능. 단, 이중 업데이트에 의한 불일치 리스크 존재.
+**허용 근거**: like 테이블이 정확한 원본. likeCount는 성능을 위한 파생값이므로 약간의 지연/불일치는 감수한다.
+
+**대응 방안**: 주기적으로 `SELECT COUNT(*) FROM likes`로 likeCount를 재집계하는 배치 운영.
 
 ### 5. 헤더 기반 인증의 보안 취약성
 
