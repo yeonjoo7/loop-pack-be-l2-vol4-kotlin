@@ -37,6 +37,7 @@ erDiagram
         text description
         decimal price
         int like_count
+        int stock_quantity
         timestamp created_at
         timestamp updated_at
         timestamp deleted_at
@@ -140,7 +141,8 @@ erDiagram
 
 **설계 의도**:
 - `price`는 DECIMAL을 사용한다. FLOAT/DOUBLE은 부동소수점 오차로 금액 계산 시 문제가 생길 수 있다.
-- 재고를 분리한 이유: 상품 정보(카탈로그)와 재고(운영/물류)는 변경 빈도와 성격이 다르다. 재고는 주문마다 바뀌지만 상품 정보는 거의 바뀌지 않는다. 같은 행을 경쟁하지 않도록 분리한다.
+- `stock_quantity`는 목록 조회 전용 캐시값이다. `product_stocks.quantity`가 원본이며, 상세 조회·주문 검증은 반드시 `product_stocks`를 사용한다. 목록에서 JOIN 없이 재고 여부를 빠르게 표시하기 위한 비정규화다.
+- `like_count`와 동일하게 `AFTER_COMMIT` 이벤트로 `product_stocks` 변경 후 동기화한다.
 - `brand_id`는 brands.id를 참조하는 FK다. ON DELETE CASCADE를 사용하지 않고 애플리케이션에서 CASCADE Soft Delete를 처리한다.
 
 ---

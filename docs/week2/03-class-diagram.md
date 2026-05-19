@@ -35,6 +35,7 @@ classDiagram
         +String description
         +BigDecimal price
         +Int likeCount
+        +Int stockQuantity
         +LocalDateTime createdAt
         +LocalDateTime updatedAt
         +LocalDateTime deletedAt
