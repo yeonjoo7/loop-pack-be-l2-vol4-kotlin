@@ -36,11 +36,17 @@ erDiagram
         varchar name
         text description
         decimal price
-        int stock_quantity
         int like_count
         timestamp created_at
         timestamp updated_at
         timestamp deleted_at
+    }
+
+    product_stocks {
+        bigint id PK
+        bigint product_id FK
+        int quantity
+        timestamp updated_at
     }
 
     likes {
@@ -71,6 +77,7 @@ erDiagram
     users ||--o{ likes : "좋아요 등록"
     users ||--o{ orders : "주문 생성"
     brands ||--o{ products : "상품 소속"
+    products ||--|| product_stocks : "재고 보유"
     products ||--o{ likes : "좋아요 대상"
     orders ||--|{ order_items : "주문 항목 포함"
 ```
@@ -117,7 +124,7 @@ erDiagram
 
 ### products (상품)
 
-브랜드에 속하는 개별 상품 정보와 재고를 관리한다.
+브랜드에 속하는 개별 상품 정보를 관리한다. 재고는 `product_stocks` 테이블로 분리한다.
 
 | 컬럼 | 타입 | 제약 | 설명 |
 |---|---|---|---|
@@ -126,15 +133,34 @@ erDiagram
 | `name` | VARCHAR(200) | NOT NULL | 상품명 |
 | `description` | TEXT | NULLABLE | 상품 설명 |
 | `price` | DECIMAL(10, 2) | NOT NULL, CHECK (price > 0) | 상품 가격 |
-| `stock_quantity` | INT | NOT NULL, CHECK (stock_quantity >= 0) | 현재 재고 수량 |
+| `like_count` | INT | NOT NULL, DEFAULT 0 | 좋아요 수 (비정규화 집계값) |
 | `created_at` | TIMESTAMP | NOT NULL | 생성 일시 |
 | `updated_at` | TIMESTAMP | NOT NULL | 수정 일시 |
 | `deleted_at` | TIMESTAMP | NULLABLE | Soft Delete 처리 일시 |
 
 **설계 의도**:
 - `price`는 DECIMAL을 사용한다. FLOAT/DOUBLE은 부동소수점 오차로 금액 계산 시 문제가 생길 수 있다.
-- `stock_quantity`에 `CHECK (stock_quantity >= 0)` 제약을 두어 DB 레벨에서도 음수 재고를 방지한다.
-- `brand_id`는 brands.id를 참조하는 FK다. 단, Soft Delete된 브랜드의 상품도 참조가 유지되므로 ON DELETE CASCADE를 사용하지 않는다. 애플리케이션에서 CASCADE Soft Delete를 처리한다.
+- 재고를 분리한 이유: 상품 정보(카탈로그)와 재고(운영/물류)는 변경 빈도와 성격이 다르다. 재고는 주문마다 바뀌지만 상품 정보는 거의 바뀌지 않는다. 같은 행을 경쟁하지 않도록 분리한다.
+- `brand_id`는 brands.id를 참조하는 FK다. ON DELETE CASCADE를 사용하지 않고 애플리케이션에서 CASCADE Soft Delete를 처리한다.
+
+---
+
+### product_stocks (상품 재고)
+
+상품의 재고 수량을 별도로 관리한다. Product와 1:1 관계다.
+
+| 컬럼 | 타입 | 제약 | 설명 |
+|---|---|---|---|
+| `id` | BIGINT | PK, AUTO_INCREMENT | 재고 식별자 |
+| `product_id` | BIGINT | FK → products.id, UNIQUE | 대상 상품 (1:1) |
+| `quantity` | INT | NOT NULL, CHECK (quantity >= 0) | 현재 재고 수량 |
+| `updated_at` | TIMESTAMP | NOT NULL | 재고 변경 일시 |
+
+**설계 의도**:
+- 재고 차감/복원이 products 행을 건드리지 않아 상품 조회와 재고 변경이 분리된다.
+- `quantity >= 0` CHECK 제약으로 DB 레벨에서도 음수 재고를 방지한다.
+- `product_id`에 UNIQUE 제약으로 1:1 관계를 강제한다.
+- 추후 `stock_histories` 테이블을 추가하거나, 창고별 재고(`warehouse_id`)를 확장하기 용이한 구조다.
 
 ---
 
@@ -221,7 +247,8 @@ erDiagram
 | `brands` | UNIQUE | name |
 | `products` | FK | brand_id → brands.id |
 | `products` | CHECK | price > 0 |
-| `products` | CHECK | stock_quantity >= 0 |
+| `product_stocks` | UNIQUE | product_id |
+| `product_stocks` | CHECK | quantity >= 0 |
 | `likes` | UNIQUE | (user_id, product_id) |
 | `likes` | FK | user_id → users.id |
 | `likes` | FK | product_id → products.id |
@@ -274,29 +301,20 @@ erDiagram
 
 ### 재고 동시성 처리
 
-`products.stock_quantity` 컬럼은 동시 주문 시 경쟁 조건(Race Condition)이 발생할 수 있다.
-
-**문제 시나리오**: 두 사용자가 동시에 재고 1개인 상품을 주문.
-
-- 두 트랜잭션이 모두 `stock_quantity = 1`을 읽음
-- 둘 다 재고 충분으로 판단하고 차감
-- 결과: `stock_quantity = -1` (DB CHECK 위반 또는 음수 재고)
-
-**해결 방법**:
+`product_stocks.quantity` 컬럼은 동시 주문 시 경쟁 조건(Race Condition)이 발생할 수 있다. 현재 범위에서는 미고려이며, 추후 아래 방법으로 대응한다.
 
 ```sql
 -- 비관적 락 방식
-SELECT * FROM products WHERE id = ? FOR UPDATE;
--- 락 획득 후 재고 확인 및 차감
+SELECT * FROM product_stocks WHERE product_id = ? FOR UPDATE;
 
 -- 또는 조건부 UPDATE 방식
-UPDATE products
-SET stock_quantity = stock_quantity - ?
-WHERE id = ? AND stock_quantity >= ?;
+UPDATE product_stocks
+SET quantity = quantity - ?
+WHERE product_id = ? AND quantity >= ?;
 -- 영향받은 행 수가 0이면 재고 부족으로 처리
 ```
 
-DB의 `CHECK (stock_quantity >= 0)` 제약은 최후 방어선으로 동작한다.
+`product_stocks`를 별도 테이블로 분리함으로써, 락 범위가 products 전체 행이 아닌 재고 행만으로 좁아지는 이점이 있다.
 
 ---
 

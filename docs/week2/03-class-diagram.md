@@ -34,20 +34,26 @@ classDiagram
         +String name
         +String description
         +BigDecimal price
-        +Int stockQuantity
         +Int likeCount
         +LocalDateTime createdAt
         +LocalDateTime updatedAt
         +LocalDateTime deletedAt
-        +update(name, description, price, stock) void
+        +update(name, description, price) void
         +softDelete() void
         +isDeleted() Boolean
-        +hasStock(quantity) Boolean
-        +deductStock(quantity) void
-        +restoreStock(quantity) void
         +incrementLikeCount() void
         +decrementLikeCount() void
-        +toOrderItem(quantity: Int) OrderItem
+        +toOrderItem(quantity: Int, stock: ProductStock) OrderItem
+    }
+
+    class ProductStock {
+        +Long id
+        +Long productId
+        +Int quantity
+        +LocalDateTime updatedAt
+        +deduct(quantity: Int) void
+        +restore(quantity: Int) void
+        +hasEnough(quantity: Int) Boolean
     }
 
     class Like {
@@ -89,6 +95,7 @@ classDiagram
     }
 
     Brand "1" --o "0..*" Product : 브랜드에 속함
+    Product "1" -- "1" ProductStock : 재고 보유
     Order "1" *-- "1..*" OrderItem : 주문 항목 포함
     Product ..> OrderItem : toOrderItem() 생성
     Order --> OrderStatus : 상태 보유
