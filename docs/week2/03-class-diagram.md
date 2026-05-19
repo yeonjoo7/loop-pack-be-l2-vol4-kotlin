@@ -50,18 +50,6 @@ classDiagram
         +toOrderItem(quantity: Int) OrderItem
     }
 
-    class LikeCreatedEvent {
-        +Long productId
-        +Long userId
-        +LikeEventType type
-    }
-
-    class LikeEventType {
-        <<enumeration>>
-        LIKED
-        UNLIKED
-    }
-
     class Like {
         +Long id
         +Long userId
@@ -105,8 +93,6 @@ classDiagram
     Product ..> OrderItem : toOrderItem() 생성
     Order --> OrderStatus : 상태 보유
     Like "0..*" --> "1" Product : 좋아요 대상
-    Like ..> LikeCreatedEvent : AFTER_COMMIT 발행
-    LikeCreatedEvent --> LikeEventType
 ```
 
 ---
