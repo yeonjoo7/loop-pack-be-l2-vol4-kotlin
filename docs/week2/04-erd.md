@@ -37,6 +37,7 @@ erDiagram
         text description
         decimal price
         int stock_quantity
+        int like_count
         timestamp created_at
         timestamp updated_at
         timestamp deleted_at

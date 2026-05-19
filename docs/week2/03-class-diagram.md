@@ -47,7 +47,7 @@ classDiagram
         +restoreStock(quantity) void
         +incrementLikeCount() void
         +decrementLikeCount() void
-        +toSnapshot() OrderItemSnapshot
+        +toOrderItem(quantity: Int) OrderItem
     }
 
     class LikeCreatedEvent {
@@ -92,13 +92,6 @@ classDiagram
         +subtotal() BigDecimal
     }
 
-    class OrderItemSnapshot {
-        +Long productId
-        +String productName
-        +BigDecimal price
-        +Int quantity
-    }
-
     class OrderStatus {
         <<enumeration>>
         PENDING
@@ -109,8 +102,7 @@ classDiagram
 
     Brand "1" --o "0..*" Product : 브랜드에 속함
     Order "1" *-- "1..*" OrderItem : 주문 항목 포함
-    Product "1" ..> "1" OrderItemSnapshot : 스냅샷 생성
-    OrderItem ..> OrderItemSnapshot : 스냅샷으로 초기화
+    Product ..> OrderItem : toOrderItem() 생성
     Order --> OrderStatus : 상태 보유
     Like "0..*" --> "1" Product : 좋아요 대상
     Like ..> LikeCreatedEvent : AFTER_COMMIT 발행
@@ -160,9 +152,9 @@ classDiagram
 | `restoreStock(quantity)` | 결제 실패 보상 시 재고 복구 |
 | `incrementLikeCount()` | 좋아요 등록 시 likeCount 증가 (이벤트 핸들러에서 호출) |
 | `decrementLikeCount()` | 좋아요 취소 시 likeCount 감소 (0 미만 방지) |
-| `toSnapshot()` | 현재 시점의 name, price를 OrderItemSnapshot으로 변환 |
+| `toOrderItem(quantity)` | 현재 시점의 name, price, quantity로 OrderItem 직접 생성 |
 
-**설계 의도**: `deductStock()`과 `restoreStock()`을 도메인 메서드로 두면, 재고 연산의 유효성 검증(0 이하 불가 등)이 한 곳에 모인다. 서비스 레이어에서 직접 `stockQuantity--`를 하지 않는다. `likeCount`도 동일하게 도메인 메서드를 통해서만 변경한다.
+**설계 의도**: `deductStock()`과 `restoreStock()`을 도메인 메서드로 두면, 재고 연산의 유효성 검증(0 이하 불가 등)이 한 곳에 모인다. `toOrderItem()`도 마찬가지로 Product이 자신의 스냅샷 데이터로 OrderItem을 만드는 책임을 직접 가진다. 중간 VO(OrderItemSnapshot) 없이 단순하게 유지한다.
 
 **`brandId`를 객체 참조가 아닌 ID로 두는 이유**: JPA `@ManyToOne`으로 Brand를 직접 참조할 수도 있지만, 집계 루트(Aggregate Root) 개념에 따라 Brand와 Product를 별도 집계로 보고 ID 참조만 유지한다. Brand 전체를 Product 조회 시마다 JOIN하는 비용을 줄이는 효과도 있다.
 
@@ -271,14 +263,14 @@ Order "1" *-- "1..*" OrderItem
 - OrderItem은 Order 없이 존재할 수 없다. Order가 삭제되면 OrderItem도 함께 삭제되어야 한다.
 - **합성(Composition)** 으로 표현한 이유: OrderItem은 Order의 일부이며, 독립적인 생명주기를 가지지 않는다.
 
-### Product - OrderItemSnapshot (의존 관계)
+### Product - OrderItem (의존 관계)
 
 ```
-Product "1" ..> "1" OrderItemSnapshot
+Product ..> OrderItem : toOrderItem()
 ```
 
-- Product의 `toSnapshot()` 메서드가 OrderItemSnapshot을 생성한다.
-- 단방향 의존이며, Snapshot은 Product와 별도로 저장된다.
+- `Product.toOrderItem(quantity)`이 직접 OrderItem을 생성한다.
+- 중간 VO 없이 단순하게 유지한다. OrderItem 자체가 스냅샷 역할을 한다.
 
 ---
 
