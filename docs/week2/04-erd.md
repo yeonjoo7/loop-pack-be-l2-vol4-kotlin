@@ -113,7 +113,7 @@ erDiagram
 
 `name`에 UNIQUE 제약을 걸어 브랜드명 중복을 DB 레벨에서도 방지한다. `deleted_at IS NULL`인 레코드만 활성 브랜드로 취급한다.
 
-**주의**: Soft Delete된 브랜드와 동일한 이름으로 새 브랜드를 만들 수 없다. 필요 시 애플리케이션에서 `WHERE deleted_at IS NULL`로 중복 검증하는 방식으로 전환한다.
+Soft Delete 시 `name`을 `{name}_deleted_{id}` 형태로 변경한다. UNIQUE 제약을 유지하면서도 동일한 이름으로 새 브랜드를 생성할 수 있게 된다.
 
 ---
 
@@ -213,19 +213,13 @@ erDiagram
 
 ## 잠재 리스크
 
-### 1. Soft Delete와 UNIQUE 제약 충돌 (brands.name)
-
-삭제된 브랜드와 동일한 이름으로 새 브랜드를 만들 수 없다.
-
-**대응 방안**: `UNIQUE (name)` 대신 애플리케이션에서 `WHERE deleted_at IS NULL`로만 중복 검증. PostgreSQL이라면 Partial Index(`WHERE deleted_at IS NULL`)도 가능.
-
-### 2. 보상 트랜잭션 실패 시 재고 불일치
+### 1. 보상 트랜잭션 실패 시 재고 불일치
 
 결제 실패 후 재고 복구(보상 TX)도 실패하면, 재고는 차감됐으나 주문은 FAILED인 상태가 된다.
 
 **대응 방안**: 운영팀 알림 체계 마련. 이후 Outbox 패턴으로 보완.
 
-### 3. 주문 상태 이력 부재
+### 2. 주문 상태 이력 부재
 
 `orders.status`는 현재 상태만 저장한다. 상태 변경 이력이 없어 장애 디버깅과 CS 처리가 어렵다.
 
