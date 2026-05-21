@@ -69,7 +69,13 @@ sequenceDiagram
     User->>Facade: 주문 생성 (userId, items)
 
     Note over Facade,OrdSvc: ── TX1 시작 ──
-    Facade->>ProdSvc: 재고 확인 및 차감 (product_stocks)
+    loop 각 상품
+        Facade->>ProdSvc: stock.hasEnough(quantity)
+        alt 재고 부족
+            ProdSvc-->>Facade: 재고 부족 예외
+        end
+        ProdSvc->>ProdSvc: stock.deduct(quantity)
+    end
     Facade->>OrdSvc: 주문 생성 (PENDING) + 상품 스냅샷 저장
     Note over Facade,OrdSvc: ── TX1 커밋 ──
     Note over ProdSvc: AFTER_COMMIT<br/>products.stock_quantity 동기화
@@ -83,10 +89,10 @@ sequenceDiagram
     else 결제 실패
         Pay-->>Facade: 실패
         Note over Facade,OrdSvc: ── TX2 ──
-        Facade->>ProdSvc: stock.restore()
+        Facade->>ProdSvc: stock.restore(quantity)
         Facade->>OrdSvc: order.markAsFailed()
     else 타임아웃
         Pay--xFacade: 응답 없음
-        Note over Facade: 주문 PENDING 유지<br/>추후 배치로 처리
+        Note over Facade: 주문 PENDING 유지<br/>재고 차감된 상태 보존<br/>추후 배치로 처리
     end
 ```
