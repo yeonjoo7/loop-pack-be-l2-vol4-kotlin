@@ -13,21 +13,13 @@
 ```mermaid
 sequenceDiagram
     actor User
-    participant API as LikeController
     participant Facade as LikeFacade
     participant LikeSvc as LikeService
     participant ProdSvc as ProductService
 
-    Note over API,ProdSvc: ── 좋아요 등록 (POST) ──
+    Note over Facade,ProdSvc: ── 좋아요 등록 ──
 
-    User->>API: POST /api/v1/products/{productId}/likes
-    API->>Facade: like(userId, productId)
-    Facade->>ProdSvc: 상품 존재 확인
-    alt 상품 없음 또는 삭제됨
-        ProdSvc-->>Facade: 404
-        Facade-->>API: 404 Not Found
-    end
-
+    User->>Facade: 좋아요 등록 (userId, productId)
     Note over Facade,LikeSvc: TX 시작
     Facade->>LikeSvc: findByUserIdAndProductId
     alt 이미 존재
@@ -39,12 +31,10 @@ sequenceDiagram
     Note over Facade,LikeSvc: TX 커밋 → LikeEvent 발행
     Note over ProdSvc: AFTER_COMMIT
     ProdSvc->>ProdSvc: product.likeCount += 1
-    Facade-->>API: 200 OK
 
-    Note over API,ProdSvc: ── 좋아요 취소 (DELETE) ──
+    Note over Facade,ProdSvc: ── 좋아요 취소 ──
 
-    User->>API: DELETE /api/v1/products/{productId}/likes
-    API->>Facade: unlike(userId, productId)
+    User->>Facade: 좋아요 취소 (userId, productId)
     Note over Facade,LikeSvc: TX 시작
     Facade->>LikeSvc: findByUserIdAndProductId
     alt 존재하지 않음
@@ -55,7 +45,6 @@ sequenceDiagram
     Note over Facade,LikeSvc: TX 커밋 → LikeEvent 발행
     Note over ProdSvc: AFTER_COMMIT
     ProdSvc->>ProdSvc: product.likeCount -= 1
-    Facade-->>API: 200 OK
 ```
 
 ---
