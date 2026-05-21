@@ -61,46 +61,32 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor User
-    participant API as OrderController
     participant Facade as OrderFacade
     participant ProdSvc as ProductService
     participant OrdSvc as OrderService
     participant Pay as PaymentSystem (외부)
 
-    User->>API: POST /api/v1/orders {items: [{productId, quantity}]}
-    API->>Facade: createOrder(userId, items)
+    User->>Facade: 주문 생성 (userId, items)
 
     Note over Facade,OrdSvc: ── TX1 시작 ──
-    loop 각 상품
-        Facade->>ProdSvc: 재고 확인 (product_stocks)
-        alt 재고 부족
-            ProdSvc-->>Facade: 재고 부족 예외
-            Facade-->>API: 400 Bad Request
-        end
-        ProdSvc->>ProdSvc: stock.deduct(quantity)
-    end
+    Facade->>ProdSvc: 재고 확인 및 차감 (product_stocks)
     Facade->>OrdSvc: 주문 생성 (PENDING) + 상품 스냅샷 저장
     Note over Facade,OrdSvc: ── TX1 커밋 ──
     Note over ProdSvc: AFTER_COMMIT<br/>products.stock_quantity 동기화
 
-    Facade->>Pay: 결제 요청 (orderId, amount)
+    Facade->>Pay: 결제 요청
 
     alt 결제 성공
         Pay-->>Facade: 성공
-        Note over Facade,OrdSvc: ── TX2 시작 ──
+        Note over Facade,OrdSvc: ── TX2 ──
         Facade->>OrdSvc: order.markAsPaid()
-        Note over Facade,OrdSvc: ── TX2 커밋 ──
-        Facade-->>API: 201 Created
     else 결제 실패
         Pay-->>Facade: 실패
-        Note over Facade,OrdSvc: ── TX2 시작 ──
-        Facade->>ProdSvc: stock.restore(quantity)
+        Note over Facade,OrdSvc: ── TX2 ──
+        Facade->>ProdSvc: stock.restore()
         Facade->>OrdSvc: order.markAsFailed()
-        Note over Facade,OrdSvc: ── TX2 커밋 ──
-        Facade-->>API: 400 Bad Request
     else 타임아웃
         Pay--xFacade: 응답 없음
-        Note over Facade: 주문 PENDING 유지<br/>재고 차감된 상태로 보존<br/>추후 배치로 처리
-        Facade-->>API: 202 Accepted
+        Note over Facade: 주문 PENDING 유지<br/>추후 배치로 처리
     end
 ```
