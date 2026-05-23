@@ -1,0 +1,27 @@
+### 회원가입
+POST {{commerce-api}}/api/v1/users
+Content-Type: application/json
+
+{
+  "loginId": "loopers01",
+  "password": "Pass1234!",
+  "name": "홍길동",
+  "birthDate": "1990-01-01",
+  "email": "loopers@example.com"
+}
+
+### 내 정보 조회
+GET {{commerce-api}}/api/v1/users/me
+X-Loopers-LoginId: loopers01
+X-Loopers-LoginPw: Pass1234!
+
+### 비밀번호 수정
+PATCH {{commerce-api}}/api/v1/users/me/password
+Content-Type: application/json
+X-Loopers-LoginId: loopers01
+X-Loopers-LoginPw: Pass1234!
+
+{
+  "currentPassword": "Pass1234!",
+  "newPassword": "NewPass1!"
+}
